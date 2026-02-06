@@ -20,6 +20,8 @@ export function useScrollFriction() {
   const cooldownPeriod = 10000 // 10s cooldown to prevent rapid toggling
   const lastTouchYRef = useRef<number>(0)
   const touchScrollActiveRef = useRef<boolean>(false)
+  /** Set in touchstart: whether this gesture started on a button/link (we never capture). Avoids mid-gesture flip when finger moves over a link. */
+  const touchStartedOnInteractiveRef = useRef<boolean>(false)
 
   useEffect(() => {
     if (!trackerRef.current) {
@@ -65,18 +67,18 @@ export function useScrollFriction() {
     }
 
     // mobile: apply same friction via touch (touchmove fires; wheel does not on mobile)
+    // Decide capture once per gesture from touchstart target; do not re-check target on touchmove (finger moving over a link would otherwise flip between friction and native scroll).
     const handleTouchStart = (e: TouchEvent) => {
       if (!isCozy || e.touches.length !== 1) return
       const target = e.target as Element
-      if (target?.closest(TOUCH_CAPTURE_SKIP_SELECTOR)) return
+      touchStartedOnInteractiveRef.current = !!target?.closest(TOUCH_CAPTURE_SKIP_SELECTOR)
       lastTouchYRef.current = e.touches[0].clientY
       touchScrollActiveRef.current = false
     }
 
     const handleTouchMove = (e: TouchEvent) => {
       if (!isCozy || e.touches.length !== 1) return
-      const target = e.target as Element
-      if (target?.closest(TOUCH_CAPTURE_SKIP_SELECTOR)) return
+      if (touchStartedOnInteractiveRef.current) return
 
       const currentY = e.touches[0].clientY
       const deltaY = lastTouchYRef.current - currentY // finger up = positive = scroll down
@@ -101,6 +103,14 @@ export function useScrollFriction() {
       })
 
       tracker.recordScroll(window.scrollY || document.documentElement.scrollTop, Date.now())
+    }
+
+    const handleTouchEnd = () => {
+      touchScrollActiveRef.current = false
+    }
+
+    const handleTouchCancel = () => {
+      touchScrollActiveRef.current = false
     }
 
     // listen for dwell events from post cards
@@ -132,6 +142,8 @@ export function useScrollFriction() {
     window.addEventListener("wheel", handleWheel, { passive: false })
     window.addEventListener("touchstart", handleTouchStart, { passive: true })
     window.addEventListener("touchmove", handleTouchMove, { passive: false })
+    window.addEventListener("touchend", handleTouchEnd, { passive: true })
+    window.addEventListener("touchcancel", handleTouchCancel, { passive: true })
     window.addEventListener("dwellStart", handleDwellStart as EventListener)
     window.addEventListener("dwellEnd", handleDwellEnd as EventListener)
 
@@ -142,6 +154,8 @@ export function useScrollFriction() {
       window.removeEventListener("wheel", handleWheel)
       window.removeEventListener("touchstart", handleTouchStart)
       window.removeEventListener("touchmove", handleTouchMove)
+      window.removeEventListener("touchend", handleTouchEnd)
+      window.removeEventListener("touchcancel", handleTouchCancel)
       window.removeEventListener("dwellStart", handleDwellStart)
       window.removeEventListener("dwellEnd", handleDwellEnd)
       if (checkIntervalRef.current) {
